@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>分享笔记 - Smart Note</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/element-plus"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        body { background: #fff; margin: 0; padding: 40px; font-family: sans-serif; color: #333; line-height: 1.8; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .title { font-size: 32px; font-weight: 600; margin-bottom: 10px; }
+        .meta { color: #999; font-size: 14px; margin-bottom: 40px; border-bottom: 1px solid #eee; padding-bottom: 20px; }
+        .summary { background: #f9f9f9; padding: 20px; border-radius: 4px; margin-bottom: 30px; border-left: 4px solid #ddd; font-style: italic; }
+        .content { white-space: pre-wrap; word-wrap: break-word; font-size: 16px; }
+    </style>
+</head>
+<body>
+<div id="app" class="container">
+    <div v-if="loading" style="text-align: center; margin-top: 100px;">加载中...</div>
+    <div v-else-if="error" style="text-align: center; margin-top: 100px; color: #999;">{{ error }}</div>
+    <template v-else>
+        <div class="title">{{ note.title }}</div>
+        <div class="meta">最后更新：{{ note.updateTime ? note.updateTime.replace('T', ' ') : '' }}</div>
+
+        <div v-if="note.summary" class="summary">
+            <strong>AI 摘要：</strong>{{ note.summary }}
+        </div>
+
+        <div class="content">{{ note.content }}</div>
+    </template>
+</div>
+
+<script>
+    const { createApp, ref, onMounted } = Vue;
+    createApp({
+        setup() {
+            const note = ref({});
+            const loading = ref(true);
+            const error = ref('');
+
+            onMounted(async () => {
+                // 从 URL 中获取 ID (例如 public.html?id=1)
+                const params = new URLSearchParams(window.location.search);
+                const id = params.get('id');
+                if (!id) { error.value = "无效的链接"; loading.value = false; return; }
+
+                try {
+                    const res = await axios.get(`http://localhost:8080/api/note/public/${id}`);
+                    if (res.data.code === 200) {
+                        note.value = res.data.data;
+                    } else {
+                        error.value = res.data.msg;
+                    }
+                } catch (e) {
+                    error.value = "服务器连接失败";
+                } finally {
+                    loading.value = false;
+                }
+            });
+            return { note, loading, error };
+        }
+    }).mount('#app');
+</script>
+</body>
+</html>

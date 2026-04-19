@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Note - 智能笔记</title>
+    <link rel="stylesheet" href="https://unpkg.com/element-plus/dist/index.css">
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://unpkg.com/element-plus"></script>
+    <script src="https://unpkg.com/@element-plus/icons-vue"></script>
+    <script src="https://unpkg.com/axios/dist/axios.min.js"></script>
+    <style>
+        body { margin: 0; background-color: #ffffff; font-family: -apple-system, system-ui, sans-serif; }
+        .layout-container { height: 100vh; display: flex; overflow: hidden; }
+        .global-nav { width: 68px; background: #1a1a1a; display: flex; flex-direction: column; align-items: center; padding-top: 30px; gap: 25px; z-index: 10; }
+        .nav-item { color: #888; cursor: pointer; text-align: center; transition: 0.2s; width: 100%; }
+        .nav-item:hover, .nav-item.active { color: #fff; }
+        .nav-icon { font-size: 20px; display: block; margin-bottom: 5px; }
+        .nav-label { font-size: 10px; }
+        .aside-menu { width: 280px; border-right: 1px solid #f0f0f0; background: #fafafa; display: flex; flex-direction: column; }
+        .aside-header { padding: 24px 20px; font-weight: 600; font-size: 15px; color: #333; display: flex; justify-content: space-between; align-items: center; }
+        .note-list { flex: 1; overflow-y: auto; }
+        .note-item { padding: 18px 20px; border-bottom: 1px solid #f5f5f5; cursor: pointer; transition: 0.2s; }
+        .note-item:hover { background: #f0f0f0; }
+        .note-item.active { background: #f0f0f0; border-right: 3px solid #333; }
+        .main-content { flex: 1; padding: 40px 60px; display: flex; flex-direction: column; background: #ffffff; overflow-y: auto; }
+        .ai-summary-box { background: #f9f9f9; border: 1px solid #eee; padding: 20px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; color: #555; }
+        .avatar-circle { width: 80px; height: 80px; background: #333; color: #fff; border-radius: 50%; line-height: 80px; text-align: center; font-size: 30px; margin: 0 auto 15px; overflow: hidden; }
+        .tag-row { margin-bottom: 15px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    </style>
+</head>
+<body>
+<div id="app">
+    <el-container class="layout-container">
+        <div class="global-nav">
+            <div class="nav-item" :class="{ active: currentModule === 'notes' }" @click="switchModule('notes')">
+                <span class="nav-icon">📓</span><span class="nav-label">笔记</span>
+            </div>
+            <div class="nav-item" :class="{ active: currentModule === 'trash' }" @click="switchModule('trash')">
+                <span class="nav-icon">🗑️</span><span class="nav-label">回收站</span>
+            </div>
+            <div class="nav-item" :class="{ active: currentModule === 'social' }" @click="switchModule('social')">
+                <span class="nav-icon">👥</span><span class="nav-label">社交</span>
+            </div>
+            <div class="nav-item" :class="{ active: currentModule === 'profile' }" @click="switchModule('profile')">
+                <span class="nav-icon">⚙️</span><span class="nav-label">设置</span>
+            </div>
+            <div class="nav-item" :class="{ active: currentModule === 'history' }" @click="switchModule('history')">
+                <span class="nav-icon">🕒</span><span class="nav-label">历史</span>
+            </div>
+        </div>
+
+        <div class="aside-menu" v-if="['notes', 'trash', 'history'].includes(currentModule)">
+            <div class="aside-header">
+                <span>{{ moduleTitle }}</span>
+                <el-button v-if="currentModule === 'notes'" size="small" type="primary" plain @click="newNote">新建</el-button>
+            </div>
+            <div class="note-list">
+                <div class="note-item" :class="{ active: currentNote.id === item.id }" v-for="item in noteList" :key="item.id" @click="selectNote(item)">
+                    <div style="font-weight: 500;">{{ item.title || '无标题' }}</div>
+                    <div style="font-size: 11px; color: #bbb; margin-top: 5px;">{{ formatDate(item.updateTime) }}</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="main-content">
+            <template v-if="['notes', 'trash'].includes(currentModule)">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                    <el-input style="font-size: 24px; font-weight: bold; width: 60%;" v-model="currentNote.title" placeholder="标题..." :readonly="currentModule === 'trash'"></el-input>
+                    <div v-if="currentNote.id || currentModule === 'notes'">
+                        <template v-if="currentModule !== 'trash'">
+                            <el-button @click="analyzeNote" :loading="aiLoading">AI分析</el-button>
+                            <el-button type="primary" @click="saveNote">保存</el-button>
+                            <el-button v-if="currentNote.id" type="danger" plain @click="deleteNote">回收</el-button>
+                        </template>
+                        <el-button v-else type="success" @click="restoreNote">还原</el-button>
+                    </div>
+                </div>
+
+                <div class="tag-row" v-if="currentModule !== 'trash' || currentNote.tags">
+                    <el-icon><price-tag /></el-icon>
+                    <el-tag v-for="t in (currentNote.tags ? currentNote.tags.split('，') : [])" :key="t" size="small" type="info">{{t}}</el-tag>
+                    <el-input v-if="currentModule !== 'trash'" size="small" style="width: 150px" v-model="currentNote.tags" placeholder="标签(中文逗号隔开)"></el-input>
+                </div>
+
+                <div v-if="currentNote.summary" class="ai-summary-box">
+                    <strong>✨ AI 摘要：</strong><br>{{ currentNote.summary }}
+                </div>
+
+                <el-input type="textarea" :rows="22" v-model="currentNote.content" placeholder="内容..." :readonly="currentModule === 'trash'"></el-input>
+            </template>
+
+            <template v-else-if="currentModule === 'social'">
+                <div style="max-width: 600px; margin: 0 auto;">
+                    <h3>添加好友</h3>
+                    <div style="display: flex; gap: 10px; margin-bottom: 20px;">
+                        <el-input v-model="searchUserKey" placeholder="输入邮箱/手机号"></el-input>
+                        <el-button type="primary" @click="searchAndAddFriend">发送申请</el-button>
+                    </div>
+                    <el-tabs v-model="activeSocialTab">
+                        <el-tab-pane label="我的好友" name="friends">
+                            <el-table :data="friendList" empty-text="暂无好友">
+                                <el-table-column prop="nickname" label="昵称"></el-table-column>
+                                <el-table-column prop="email" label="账号"></el-table-column>
+                            </el-table>
+                        </el-tab-pane>
+                        <el-tab-pane label="申请通知" name="requests">
+                            <el-table :data="friendRequests" empty-text="没有新的申请">
+                                <el-table-column prop="fromUsername" label="申请人"></el-table-column>
+                                <el-table-column label="操作">
+                                    <template #default="scope">
+                                        <el-button size="small" type="success" @click="handleFriendRequest(scope.row.id, 1)">同意</el-button>
+                                    </template>
+                                </el-table-column>
+                            </el-table>
+                        </el-tab-pane>
+                    </el-tabs>
+                </div>
+            </template>
+
+            <template v-else-if="currentModule === 'profile'">
+                <div style="max-width: 500px; margin: 0 auto;">
+                    <div class="avatar-circle">
+                        <img v-if="user.avatar" :src="user.avatar" style="width:100%;height:100%;object-fit:cover;"/>
+                        <span v-else>U</span>
+                    </div>
+                    <h3 style="text-align: center; margin-bottom: 20px;">{{ user.nickname || '用户中心' }}</h3>
+                    <el-tabs type="border-card">
+                        <el-tab-pane label="基本资料">
+                            <el-form label-width="70px" style="padding-top: 15px;">
+                                <el-form-item label="昵称"><el-input v-model="user.nickname"></el-input></el-form-item>
+                                <el-form-item label="座右铭">
+                                    <el-input type="textarea" :rows="3" v-model="user.motto" placeholder="个性签名..."></el-input>
+                                </el-form-item>\
+                                <el-form-item label="头像URL">
+                                    <el-input v-model="user.avatar" placeholder="请输入图片链接地址..."></el-input>
+                                </el-form-item>
+                                <el-button type="primary" @click="updateProfile" style="width: 100%;">更新资料</el-button>
+                            </el-form>
+                        </el-tab-pane>
+                        <el-tab-pane label="安全中心">
+                            <el-form label-width="70px" style="padding-top: 15px;">
+                                <el-form-item label="新密码"><el-input v-model="pwdForm.newPwd" type="password" show-password></el-input></el-form-item>
+                                <el-form-item label="确认"><el-input v-model="pwdForm.confirm" type="password" show-password></el-input></el-form-item>
+                                <el-button type="danger" @click="updatePassword" style="width: 100%;">修改密码</el-button>
+                                <el-divider></el-divider>
+                                <el-button style="width: 100%;" @click="logout">退出登录</el-button>
+                            </el-form>
+                        </el-tab-pane>
+                    </el-tabs>
+                </div>
+            </template>
+        </div>
+    </el-container>
+</div>
+
+<script>
+    const { createApp, ref, computed, onMounted } = Vue;
+    const { ElMessage, ElMessageBox } = ElementPlus;
+
+    createApp({
+        setup() {
+            const apiBase = "http://localhost:8080/api";
+            const currentModule = ref('notes');
+            const noteList = ref([]);
+            const currentNote = ref({ title: '', content: '', tags: '', summary: '' });
+            const user = ref({ nickname: '', motto: '', avatar: '' });
+            const pwdForm = ref({ newPwd: '', confirm: '' });
+            const aiLoading = ref(false);
+
+            // 社交变量
+            const friendList = ref([]);
+            const friendRequests = ref([]);
+            const searchUserKey = ref('');
+            const activeSocialTab = ref('friends');
+
+            const getAuth = () => ({ headers: { 'Authorization': localStorage.getItem('token') } });
+
+            const moduleTitle = computed(() => {
+                const map = { notes: '我的笔记', trash: '回收站' };
+                return map[currentModule.value] || '列表';
+            });
+
+            // 加载数据
+            const loadData = async (url) => {
+                try {
+                    const res = await axios.get(`${apiBase}${url}`, getAuth());
+                    noteList.value = res.data.data || [];
+                } catch (e) { console.error("加载列表失败", e); }
+            };
+
+// 在 setup 里的 switchModule 函数中补上这一行
+            const switchModule = (mod) => {
+                currentModule.value = mod;
+                currentNote.value = { title: '', content: '', tags: '', summary: '' };
+
+                if (mod === 'notes') loadData('/note/list');
+                else if (mod === 'trash') loadData('/note/trash');
+                else if (mod === 'history') loadData('/note/history'); // 关键：对应后端的 /history 接口
+                else if (mod === 'profile') fetchUser();
+                else if (mod === 'social') loadSocial();
+            };
+            const selectNote = async (item) => {
+                const res = await axios.get(`${apiBase}/note/get/${item.id}`, getAuth());
+                if (res.data.data) currentNote.value = res.data.data;
+            };
+
+            const saveNote = async () => {
+                const url = currentNote.value.id ? '/note/update' : '/note/add';
+                const res = await axios.post(`${apiBase}${url}`, currentNote.value, getAuth());
+                if (res.data.code === 200 || res.data.code === 1) {
+                    ElMessage.success("保存成功");
+                    loadData('/note/list');
+                }
+            };
+
+            // 核心功能：回收（删除）
+            const deleteNote = async () => {
+                try {
+                    await ElMessageBox.confirm('确定将此笔记移入回收站吗？');
+                    const res = await axios.delete(`${apiBase}/note/${currentNote.value.id}`, getAuth());
+                    if (res.data.code === 200 || res.data.code === 1) {
+                        ElMessage.success("已移至回收站");
+                        switchModule('notes'); // 强制刷新并跳回主列表
+                    }
+                } catch (e) {}
+            };
+
+            const restoreNote = async () => {
+                const res = await axios.post(`${apiBase}/note/restore/${currentNote.value.id}`, {}, getAuth());
+                if (res.data.code === 200 || res.data.code === 1) {
+                    ElMessage.success("笔记已还原");
+                    switchModule('trash');
+                }
+            };
+
+            const analyzeNote = async () => {
+                if (!currentNote.value.content) return ElMessage.warning("内容为空");
+                aiLoading.value = true;
+                try {
+                    const res = await axios.post(`${apiBase}/note/analyze`, currentNote.value, getAuth());
+                    if (res.data.data) currentNote.value.summary = res.data.data;
+                } finally { aiLoading.value = false; }
+            };
+
+            // 社交功能逻辑
+            // 社交功能逻辑
+            const loadSocial = async () => {
+                try {
+                    const r1 = await axios.get(`${apiBase}/friend/list`, getAuth());
+                    friendList.value = r1.data.data || [];
+
+                    // 【修正】路径改为 /pending，与后端一致
+                    const r2 = await axios.get(`${apiBase}/friend/pending`, getAuth());
+                    friendRequests.value = r2.data.data || [];
+                } catch (e) {
+                    console.error("社交数据加载失败", e);
+                }
+            };
+
+            const searchAndAddFriend = async () => {
+                if(!searchUserKey.value) return;
+                try {
+                    // 【修正】参数名改为 email，与后端一致
+                    await axios.post(`${apiBase}/friend/add?email=${searchUserKey.value}`, {}, getAuth());
+                    ElMessage.success("好友申请已发出");
+                    searchUserKey.value = '';
+                } catch (e) {
+                    ElMessage.error(e.response?.data?.msg || "添加失败");
+                }
+            };
+
+            const handleFriendRequest = async (id) => {
+                try {
+                    // 【修正】路径匹配后端的 /accept/{id}
+                    await axios.post(`${apiBase}/friend/accept/${id}`, {}, getAuth());
+                    ElMessage.success("已添加好友");
+                    loadSocial();
+                } catch (e) {
+                    ElMessage.error("操作失败");
+                }
+            };
+
+            // 用户资料逻辑
+            const fetchUser = async () => {
+                const res = await axios.get(`${apiBase}/user/info`, getAuth());
+                if (res.data.data) user.value = res.data.data;
+            };
+
+            const updateProfile = async () => {
+                // 确保 user.value 包含了头像、昵称和座右铭
+                const res = await axios.post(`${apiBase}/note/updatePassword`, user.value, getAuth());
+                if (res.data.code === 200 || res.data.code === 1) {
+                    ElMessage.success("个人资料已更新");
+                    fetchUser(); // 重新加载，让顶部的图片立即生效
+                }
+            };
+
+            const updatePassword = async () => {
+                if (!pwdForm.value.newPwd || pwdForm.value.newPwd !== pwdForm.value.confirm) {
+                    return ElMessage.error("两次密码输入不一致");
+                }
+                const res = await axios.post(`${apiBase}/note/updatePassword`, { password: pwdForm.value.newPwd }, getAuth());
+                if (res.data.code === 200 || res.data.code === 1) {
+                    ElMessage.success("密码修改成功，请重新登录");
+                    logout();
+                }
+            };
+
+            const newNote = () => currentNote.value = { title: '', content: '', tags: '', summary: '' };
+            const logout = () => { localStorage.clear(); location.href = 'login.html'; };
+            const formatDate = (d) => d ? d.replace('T', ' ').substring(5, 16) : '新笔记';
+
+            onMounted(() => {
+                if (!localStorage.getItem('token')) logout();
+                else loadData('/note/list');
+            });
+
+            return {
+                currentModule, noteList, currentNote, user, pwdForm, aiLoading,
+                friendList, friendRequests, searchUserKey, activeSocialTab,
+                moduleTitle, switchModule, selectNote, saveNote, deleteNote,
+                restoreNote, analyzeNote, updateProfile, updatePassword,
+                searchAndAddFriend, handleFriendRequest,
+                newNote, logout, formatDate
+            };
+        }
+    }).use(ElementPlus).mount('#app');
+</script>
+</body>
+</html>

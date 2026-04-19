@@ -1,0 +1,38 @@
+server:
+  port: 8080
+  servlet:
+    # 注意：如果前端请求 URL 中没有 /api 前缀，请删除下面这一行
+    context-path: /api
+
+spring:
+  # 1. 数据库连接配置
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    # 确保数据库名 smart_note 已通过 SQL 创建
+    url: jdbc:mysql://127.0.0.1:3306/smart_note?serverTimezone=GMT%2B8&useUnicode=true&characterEncoding=utf-8
+    username: root
+    password: 123456 # 请填入你 root 账号的真实密码
+
+  # 2. Spring AI 配置 [cite: 10, 176]
+  ai:
+    openai:
+      api-key: sk-OGhbpSKtnFNCFmc1hLCD2c4BD6YLEZ1DYpfBgPXz22thujJ4
+      base-url: https://api.chatanywhere.tech
+
+  # 3. 文件上传配置 (满足自定义头像需求)
+  servlet:
+    multipart:
+      max-file-size: 2MB
+      max-request-size: 10MB
+
+# 4. MyBatis-Plus 增强配置 (满足逻辑删除要求)
+mybatis-plus:
+  configuration:
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 打印 SQL 方便排查“Unknown column”错误
+    map-underscore-to-camel-case: true
+  global-config:
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
